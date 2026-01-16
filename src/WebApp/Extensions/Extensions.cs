@@ -1,17 +1,12 @@
-﻿using System;
-using Azure.AI.OpenAI;
-using eShop.WebApp;
+﻿using eShop.Basket.API.Grpc;
+using eShop.WebApp.Services.OrderStatus.IntegrationEvents;
 using eShop.WebAppComponents.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.JsonWebTokens;
-using eShop.WebApp.Services.OrderStatus.IntegrationEvents;
-using eShop.Basket.API.Grpc;
-using OpenAI;
 
 public static class Extensions
 {
@@ -36,11 +31,11 @@ public static class Extensions
         builder.Services.AddGrpcClient<Basket.BasketClient>(o => o.Address = new("http://basket-api"))
             .AddAuthToken();
 
-        builder.Services.AddHttpClient<CatalogService>(o => o.BaseAddress = new("http://catalog-api"))
+        builder.Services.AddHttpClient<CatalogService>(o => o.BaseAddress = new("https+http://catalog-api"))
             .AddApiVersion(2.0)
             .AddAuthToken();
 
-        builder.Services.AddHttpClient<OrderingService>(o => o.BaseAddress = new("http://ordering-api"))
+        builder.Services.AddHttpClient<OrderingService>(o => o.BaseAddress = new("https+http://ordering-api"))
             .AddApiVersion(1.0)
             .AddAuthToken();
     }
@@ -98,27 +93,19 @@ public static class Extensions
 
     private static void AddAIServices(this IHostApplicationBuilder builder)
     {
+        ChatClientBuilder? chatClientBuilder = null;
         if (builder.Configuration["OllamaEnabled"] is string ollamaEnabled && bool.Parse(ollamaEnabled))
         {
-            builder.AddOllamaSharpChatClient("chat");
-            builder.Services.AddChatClient(b => b.GetRequiredService<IChatClient>())
-                .UseFunctionInvocation()
-                .UseOpenTelemetry(configure: t => t.EnableSensitiveData = true)
-                .UseLogging();
+            chatClientBuilder = builder.AddOllamaApiClient("chat")
+                .AddChatClient();
         }
-        else
+        else if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("chatModel")))
         {
-            var chatModel = builder.Configuration.GetSection("AI").Get<AIOptions>()?.OpenAI?.ChatModel;
-            if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("openai")) && !string.IsNullOrWhiteSpace(chatModel))
-            {
-                builder.AddOpenAIClientFromConfiguration("openai");
-                builder.Services.AddChatClient(sp => sp.GetRequiredService<OpenAIClient>().AsChatClient(chatModel ?? "gpt-4o-mini"))
-                    .UseFunctionInvocation()
-                    .UseOpenTelemetry(configure: t => t.EnableSensitiveData = true)
-                    .UseLogging()
-                    .Build();
-            }
+            chatClientBuilder = builder.AddOpenAIClientFromConfiguration("chatModel")
+                .AddChatClient();
         }
+
+        chatClientBuilder?.UseFunctionInvocation();
     }
 
     public static async Task<string?> GetBuyerIdAsync(this AuthenticationStateProvider authenticationStateProvider)
